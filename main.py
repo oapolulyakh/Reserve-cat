@@ -1,4 +1,6 @@
 import sys
+import time
+
 import requests
 import json
 import logging
@@ -20,16 +22,16 @@ def get_url_image(text):
     Получение url картинки по заданному тексту
     """
     url_photo = f'https://cataas.com/cat/says/{text}?json=true'
-    logger.info(f"Получаю картинку с текстом '{text}'...")
+    logger.info(f"I get a picture with text '{text}'...")
     response = requests.get(url_photo)
 
     if response.status_code != 200:
-        logger.error(f"Ошибка при получении картинки: {response.status_code}")
-        raise Exception(f"Ошибка при получении картинки: {response.status_code}")
+        logger.error(f"Error when receiving an image: {response.status_code}")
+        raise Exception(f"Error when receiving an image: {response.status_code}")
     data = response.json()
     image_url = data['url']
     filename = f"{text}_{data['id']}.jpg"
-    logger.info(f"Картинка получена, URL: {image_url}")
+    logger.info(f"Image received URL: {image_url}")
     return image_url, filename
 
 def check_or_create_yadisk_folder(token, folder_path):
@@ -40,19 +42,38 @@ def check_or_create_yadisk_folder(token, folder_path):
     headers = {'Authorization': f'OAuth {token}'}
     params = {'path': folder_path}
 
-    logger.info(f"Проверяю наличие папки '{folder_path}'...")
+    logger.info(f" Checking for a folder '{folder_path}'...")
     response = requests.get(url_check, headers=headers, params=params)
     if response.status_code == 404:
-        logger.warning(f"Папка '{folder_path}' не найдена, создаю новую...")
+        logger.warning(f"Folder '{folder_path}' was not found, I'm creating a new one...")
         response = requests.put(url_check, headers=headers, params=params)
         if response.status_code != 201:
-            logger.critical(f"Ошибка при создании папки: {response.status_code}, {response.text}")
-            raise Exception(f"Ошибка при создании папки: {response.status_code}, {response.text}")
+            logger.critical(f"Error when creating a folder: {response.status_code}, {response.text}")
+            raise Exception(f"Error when creating a folder: {response.status_code}, {response.text}")
     elif response.status_code != 200:
-        logger.error(f"Ошибка при проверке папки: {response.status_code}, {response.text}")
-        raise Exception(f"Ошибка при проверке папки: {response.status_code}, {response.text}")
+        logger.error(f"Error checking the folder: {response.status_code}, {response.text}")
+        raise Exception(f"Error checking the folder: {response.status_code}, {response.text}")
 
-    logger.info(f"Папка '{folder_path}' доступна.")
+    logger.info(f"The folder '{folder_path}' is available.")
+
+def wait_finish_upload(token, remote_path):
+    """
+        Ждёт, пока файл будет загружен на Яндекс.Диск.
+        """
+    url = 'https://cloud-api.yandex.net/v1/disk/resources'
+    headers = {'Authorization': f'OAuth {token}'}
+    params = {'path': remote_path}
+    while True:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            break
+        elif response.status_code == 404:
+            pass
+        else:
+            logger.error(f"Error during waiting for file upload: {response.status_code}, {response.text}")
+            raise Exception(f"Error during waiting for file upload: {response.status_code}, {response.text}")
+        time.sleep(2)
+        logger.info(f"File '{remote_path}' is now available on Yandex.Disk.")
 
 def upload_to_yadisk(token, local_filename, remote_path, image_url):
     """
@@ -61,14 +82,16 @@ def upload_to_yadisk(token, local_filename, remote_path, image_url):
     url_get_upload_link = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
     headers = {'Authorization': f'OAuth {token}'}
     params = {'path': remote_path, 'url': image_url, 'overwrite': True}
-    logger.info(f"Начинаю загрузку файла '{local_filename}' на Яндекс.Диск...")
+    logger.info(f"I'm starting to upload the '{local_filename}' to Yandex.Disk...")
     response = requests.post(url_get_upload_link, headers=headers, params=params)
 
-    if response.status_code not in (201, 202):
-        logger.error(f"Ошибка при загрузке файла: {response.status_code}, {response.text}")
-        raise Exception(f"Ошибка при загрузке файла: {response.status_code}, {response.text}")
+    if response.status_code not in (201,202):
+        logger.error(f"Error when uploading a file: {response.status_code}, {response.text}")
+        raise Exception(f"Error when uploading a file: {response.status_code}, {response.text}")
 
-    logger.info(f"Файл '{local_filename}' успешно загружен на Яндекс.Диск.")
+    wait_finish_upload(token, remote_path)
+
+    logger.info(f"The file '{local_filename}' has been successfully uploaded to Yandex.Disk.")
 
 
 def list_and_safe_json(token, folder_path):
@@ -79,12 +102,12 @@ def list_and_safe_json(token, folder_path):
     headers = {'Authorization': f'OAuth {token}'}
     params = {'path': folder_path}
 
-    logger.info(f"Получаю список файлов в папке '{folder_path}'...")
+    logger.info(f"I get a list of files in the folder '{folder_path}'...")
     response = requests.get(url, headers=headers, params=params)
 
     if response.status_code != 200:
-        logger.error(f"Ошибка при получении списка файлов: {response.status_code}, {response.text}")
-        raise Exception(f"Ошибка при получении списка файлов: {response.status_code}, {response.text}")
+        logger.error(f"Error when getting the file list: {response.status_code}, {response.text}")
+        raise Exception(f"Error when getting the file list: {response.status_code}, {response.text}")
 
     content = response.json()
     items = content.get('_embedded', {}).get('items', [])
@@ -95,7 +118,7 @@ def list_and_safe_json(token, folder_path):
     with open('content.json', 'w', encoding='utf-8') as f:
         json.dump(content_json, f, indent=4)
 
-    logger.info(f"Данные о файлах сохранены в content.json.")
+    logger.info(f"The file data is saved in content.json.")
 
 
 if __name__ == '__main__':
@@ -108,9 +131,9 @@ if __name__ == '__main__':
         check_or_create_yadisk_folder(token, group_name)
         upload_to_yadisk(token, picture_filename, f"{group_name}/{picture_filename}", image_url)
         list_and_safe_json(token, group_name)
-        logger.info("Операция выполнена успешно.")
+        logger.info("The operation was completed successfully.")
     except Exception as e:
-        logger.exception(f"Возникла непредвиденная ошибка: {e}")
+        logger.exception(f"An unexpected error has occurred: {e}")
         sys.exit(1)
 
 
